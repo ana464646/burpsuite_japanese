@@ -248,14 +248,16 @@ public class IssueTranslationTab implements AuditIssueHandler {
             translatedArea.setText("Issue がありません。Scanner を実行してから試してください。");
             return;
         }
-        translatedArea.setText("全Issueを日本語レポートにまとめています...");
+        final int total = issues.size();
+        translatedArea.setText("全Issueを日本語レポートにまとめています... 0/" + total);
 
-        new SwingWorker<String, Void>() {
+        new SwingWorker<String, Integer>() {
             @Override
             protected String doInBackground() {
                 StringBuilder sb = new StringBuilder();
                 sb.append("【Burp 診断結果サマリ（日本語）】\n\n");
                 int index = 1;
+                int done = 0;
                 for (AuditIssue issue : issues) {
                     try {
                         String body = translationCache.get(issue);
@@ -265,11 +267,22 @@ public class IssueTranslationTab implements AuditIssueHandler {
                         }
                         sb.append("=== Issue ").append(index++).append(" ===\n");
                         sb.append(body).append("\n\n");
+                        done++;
+                        publish(done);
                     } catch (Exception e) {
                         api.logging().logToError("Failed to summarize issue: " + e.getMessage());
                     }
                 }
                 return sb.toString().trim();
+            }
+
+            @Override
+            protected void process(List<Integer> chunks) {
+                if (chunks == null || chunks.isEmpty()) {
+                    return;
+                }
+                int done = chunks.get(chunks.size() - 1);
+                translatedArea.setText("全Issueを日本語レポートにまとめています... " + done + "/" + total);
             }
 
             @Override
