@@ -6,9 +6,13 @@ import burp.api.montoya.scanner.audit.issues.AuditIssue;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableRowSorter;
 import java.awt.*;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class IssueTranslationTab implements AuditIssueHandler {
     private final MontoyaApi api;
@@ -16,15 +20,22 @@ public class IssueTranslationTab implements AuditIssueHandler {
     private final JPanel root;
     private final DefaultTableModel model;
     private final JTable table;
+    private final TableRowSorter<DefaultTableModel> sorter;
     private final JTextArea originalArea;
     private final JTextArea translatedArea;
 
     private final List<AuditIssue> issues = new ArrayList<>();
+    private final Map<AuditIssue, String> translationCache = new IdentityHashMap<>();
+
+    private final Timer translateDebounceTimer;
+    private SwingWorker<String, Void> currentTranslateWorker;
+    private AuditIssue pendingTranslateIssue;
+    private AuditIssue currentlyDisplayedIssue;
 
     public IssueTranslationTab(MontoyaApi api) {
         this.api = api;
 
-        model = new DefaultTableModel(new Object[]{"重大度", "確信度", "対象", "名称(EN)"}, 0) {
+        model = new DefaultTableModel(new Object[]{"重大度", "確信度", "対象", "名称(EN)", "名称(JP)"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
@@ -33,6 +44,11 @@ public class IssueTranslationTab implements AuditIssueHandler {
 
         table = new JTable(model);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+
+        sorter = new TableRowSorter<>(model);
+        sorter.setComparator(0, Comparator.comparingInt(IssueTranslationTab::severityRank));
+        sorter.setComparator(1, Comparator.comparingInt(IssueTranslationTab::confidenceRank));
+        table.setRowSorter(sorter);
 
         originalArea = textArea();
         translatedArea = textArea();
@@ -54,12 +70,8 @@ public class IssueTranslationTab implements AuditIssueHandler {
         JButton refresh = new JButton("更新（Site map の Issue を再取得）");
         refresh.addActionListener(e -> reloadFromSiteMap());
 
-        JButton translateSelected = new JButton("選択Issueを日本語化");
-        translateSelected.addActionListener(e -> translateSelectedIssue());
-
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
         top.add(refresh);
-        top.add(translateSelected);
 
         root = new JPanel(new BorderLayout(8, 8));
         root.add(top, BorderLayout.NORTH);
@@ -67,9 +79,12 @@ public class IssueTranslationTab implements AuditIssueHandler {
 
         api.userInterface().applyThemeToComponent(root);
 
+        translateDebounceTimer = new Timer(450, e -> startTranslateForPendingIssue());
+        translateDebounceTimer.setRepeats(false);
+
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
-                showSelectedOriginal();
+                handleSelectionChanged();
             }
         });
 
@@ -109,6 +124,9 @@ public class IssueTranslationTab implements AuditIssueHandler {
                     List<AuditIssue> loaded = get();
                     issues.clear();
                     model.setRowCount(0);
+                    translationCache.clear();
+                    translatedArea.setText("");
+                    originalArea.setText("");
                     for (AuditIssue i : loaded) addIssue(i);
                 } catch (Exception e) {
                     api.logging().logToError("Failed to update issue list: " + e.getMessage());
@@ -123,29 +141,51 @@ public class IssueTranslationTab implements AuditIssueHandler {
                 severity(issue),
                 confidence(issue),
                 safe(issue.baseUrl()),
-                safe(issue.name())
+                safe(issue.name()),
+                ""
         });
     }
 
-    private void showSelectedOriginal() {
-        int row = table.getSelectedRow();
-        if (row < 0 || row >= issues.size()) {
+    private void handleSelectionChanged() {
+        AuditIssue issue = getSelectedIssue();
+        if (issue == null) {
             originalArea.setText("");
             translatedArea.setText("");
             return;
         }
-        AuditIssue issue = issues.get(row);
+
+        currentlyDisplayedIssue = issue;
         originalArea.setText(buildOriginal(issue));
-        translatedArea.setText("");
+        translatedArea.setText("翻訳待ち...");
+
+        pendingTranslateIssue = issue;
+        translateDebounceTimer.restart();
     }
 
-    private void translateSelectedIssue() {
-        int row = table.getSelectedRow();
-        if (row < 0 || row >= issues.size()) return;
-        AuditIssue issue = issues.get(row);
+    private AuditIssue getSelectedIssue() {
+        int viewRow = table.getSelectedRow();
+        if (viewRow < 0) return null;
+        int modelRow = table.convertRowIndexToModel(viewRow);
+        if (modelRow < 0 || modelRow >= issues.size()) return null;
+        return issues.get(modelRow);
+    }
+
+    private void startTranslateForPendingIssue() {
+        AuditIssue issue = pendingTranslateIssue;
+        if (issue == null || issue != currentlyDisplayedIssue) return;
+
+        String cached = translationCache.get(issue);
+        if (cached != null) {
+            translatedArea.setText(cached);
+            return;
+        }
+
+        if (currentTranslateWorker != null) {
+            currentTranslateWorker.cancel(true);
+        }
 
         translatedArea.setText("翻訳中...");
-        new SwingWorker<String, Void>() {
+        currentTranslateWorker = new SwingWorker<String, Void>() {
             @Override
             protected String doInBackground() {
                 try {
@@ -159,12 +199,27 @@ public class IssueTranslationTab implements AuditIssueHandler {
             @Override
             protected void done() {
                 try {
-                    translatedArea.setText(get());
+                    if (isCancelled() || issue != currentlyDisplayedIssue) return;
+                    String result = get();
+                    translationCache.put(issue, result);
+                    translatedArea.setText(result);
+
+                    try {
+                        String nameJa = AuditIssueJapaneseTranslator.translateName(issue);
+                        int modelRow = issues.indexOf(issue);
+                        if (modelRow >= 0) {
+                            model.setValueAt(nameJa, modelRow, 4);
+                        }
+                    } catch (Exception ex) {
+                        api.logging().logToError("Issue name translation failed: " + ex.getMessage());
+                    }
                 } catch (Exception e) {
+                    if (issue != currentlyDisplayedIssue) return;
                     translatedArea.setText("Error: " + e.getMessage());
                 }
             }
-        }.execute();
+        };
+        currentTranslateWorker.execute();
     }
 
     private static JTextArea textArea() {
@@ -225,6 +280,28 @@ public class IssueTranslationTab implements AuditIssueHandler {
             case CERTAIN -> "確実";
             case FIRM -> "高い";
             case TENTATIVE -> "低い";
+        };
+    }
+
+    private static int severityRank(String s) {
+        if (s == null) return 0;
+        return switch (s) {
+            case "高" -> 50;
+            case "中" -> 40;
+            case "低" -> 30;
+            case "情報" -> 20;
+            case "誤検知" -> 10;
+            default -> 0;
+        };
+    }
+
+    private static int confidenceRank(String s) {
+        if (s == null) return 0;
+        return switch (s) {
+            case "確実" -> 30;
+            case "高い" -> 20;
+            case "低い" -> 10;
+            default -> 0;
         };
     }
 }

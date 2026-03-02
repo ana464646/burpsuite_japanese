@@ -8,6 +8,14 @@ public final class AuditIssueJapaneseTranslator {
     private AuditIssueJapaneseTranslator() {
     }
 
+    public static String translateName(AuditIssue issue) throws Exception {
+        String nameEn = safe(issue.name());
+        if (nameEn.isBlank()) {
+            return "";
+        }
+        return GoogleTranslator.translate(nameEn);
+    }
+
     public static String translateIssue(AuditIssue issue) throws Exception {
         String nameEn = safe(issue.name());
         String detailEn = safe(issue.detail());
@@ -24,7 +32,7 @@ public final class AuditIssueJapaneseTranslator {
             // definition() が取れない/空でも継続
         }
 
-        String nameJa = nameEn.isBlank() ? "" : GoogleTranslator.translate(nameEn);
+        String nameJa = translateName(issue);
         String detailJa = detailEn.isBlank() ? "" : GoogleTranslator.translate(detailEn);
         String remediationJa = remediationEn.isBlank() ? "" : GoogleTranslator.translate(remediationEn);
         String backgroundJa = backgroundEn.isBlank() ? "" : GoogleTranslator.translate(backgroundEn);
