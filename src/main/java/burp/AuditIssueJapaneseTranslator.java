@@ -44,33 +44,28 @@ public final class AuditIssueJapaneseTranslator {
         sb.append("確信度: ").append(confidenceJa(issue.confidence())).append("\n");
         sb.append("対象: ").append(safe(issue.baseUrl())).append("\n\n");
 
-        if (!nameEn.isBlank()) {
-            sb.append("■名称\n");
-            sb.append("- EN: ").append(nameEn).append("\n");
-            sb.append("- JA: ").append(nameJa).append("\n\n");
+        if (!nameJa.isBlank()) {
+            sb.append("■名称（日本語）\n");
+            sb.append(nameJa).append("\n\n");
         }
 
-        if (!detailEn.isBlank()) {
-            sb.append("■詳細\n");
-            sb.append("- EN:\n").append(detailEn).append("\n\n");
-            sb.append("- JA:\n").append(detailJa).append("\n\n");
+        if (!detailJa.isBlank()) {
+            sb.append("■詳細（日本語）\n");
+            sb.append(detailJa).append("\n\n");
         }
 
-        if (!backgroundEn.isBlank()) {
-            sb.append("■背景\n");
-            sb.append("- EN:\n").append(backgroundEn).append("\n\n");
-            sb.append("- JA:\n").append(backgroundJa).append("\n\n");
+        if (!backgroundJa.isBlank()) {
+            sb.append("■背景（日本語）\n");
+            sb.append(backgroundJa).append("\n\n");
         }
 
-        if (!remediationEn.isBlank() || !typicalRemediationEn.isBlank()) {
-            sb.append("■対策\n");
-            if (!remediationEn.isBlank()) {
-                sb.append("- EN(個別):\n").append(remediationEn).append("\n\n");
-                sb.append("- JA(個別):\n").append(remediationJa).append("\n\n");
+        if (!remediationJa.isBlank() || !typicalRemediationJa.isBlank()) {
+            sb.append("■対策（日本語）\n");
+            if (!remediationJa.isBlank()) {
+                sb.append(remediationJa).append("\n\n");
             }
-            if (!typicalRemediationEn.isBlank()) {
-                sb.append("- EN(一般):\n").append(typicalRemediationEn).append("\n\n");
-                sb.append("- JA(一般):\n").append(typicalRemediationJa).append("\n\n");
+            if (!typicalRemediationJa.isBlank()) {
+                sb.append(typicalRemediationJa).append("\n\n");
             }
         }
 

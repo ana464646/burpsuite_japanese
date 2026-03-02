@@ -137,6 +137,7 @@ public class IssueTranslationTab implements AuditIssueHandler {
 
     private void addIssue(AuditIssue issue) {
         issues.add(issue);
+        int row = model.getRowCount();
         model.addRow(new Object[]{
                 severity(issue),
                 confidence(issue),
@@ -144,6 +145,7 @@ public class IssueTranslationTab implements AuditIssueHandler {
                 safe(issue.name()),
                 ""
         });
+        scheduleNameTranslation(issue, row);
     }
 
     private void handleSelectionChanged() {
@@ -203,16 +205,6 @@ public class IssueTranslationTab implements AuditIssueHandler {
                     String result = get();
                     translationCache.put(issue, result);
                     translatedArea.setText(result);
-
-                    try {
-                        String nameJa = AuditIssueJapaneseTranslator.translateName(issue);
-                        int modelRow = issues.indexOf(issue);
-                        if (modelRow >= 0) {
-                            model.setValueAt(nameJa, modelRow, 4);
-                        }
-                    } catch (Exception ex) {
-                        api.logging().logToError("Issue name translation failed: " + ex.getMessage());
-                    }
                 } catch (Exception e) {
                     if (issue != currentlyDisplayedIssue) return;
                     translatedArea.setText("Error: " + e.getMessage());
@@ -220,6 +212,32 @@ public class IssueTranslationTab implements AuditIssueHandler {
             }
         };
         currentTranslateWorker.execute();
+    }
+
+    private void scheduleNameTranslation(AuditIssue issue, int modelRow) {
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() {
+                try {
+                    return AuditIssueJapaneseTranslator.translateName(issue);
+                } catch (Exception e) {
+                    api.logging().logToError("Issue name translation failed: " + e.getMessage());
+                    return "";
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String nameJa = get();
+                    if (nameJa == null || nameJa.isBlank()) return;
+                    if (modelRow < 0 || modelRow >= model.getRowCount()) return;
+                    if (issues.get(modelRow) != issue) return;
+                    model.setValueAt(nameJa, modelRow, 4);
+                } catch (Exception ignored) {
+                }
+            }
+        }.execute();
     }
 
     private static JTextArea textArea() {
