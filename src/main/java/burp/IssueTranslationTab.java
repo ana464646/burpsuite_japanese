@@ -67,11 +67,14 @@ public class IssueTranslationTab implements AuditIssueHandler {
         );
         mainSplit.setResizeWeight(0.45);
 
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton refresh = new JButton("更新（Site map の Issue を再取得）");
         refresh.addActionListener(e -> reloadFromSiteMap());
+        JButton summarizeAll = new JButton("全Issueを日本語レポート化");
+        summarizeAll.addActionListener(e -> summarizeAllIssues());
 
-        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
         top.add(refresh);
+        top.add(summarizeAll);
 
         root = new JPanel(new BorderLayout(8, 8));
         root.add(top, BorderLayout.NORTH);
@@ -235,6 +238,48 @@ public class IssueTranslationTab implements AuditIssueHandler {
                     if (issues.get(modelRow) != issue) return;
                     model.setValueAt(nameJa, modelRow, 4);
                 } catch (Exception ignored) {
+                }
+            }
+        }.execute();
+    }
+
+    private void summarizeAllIssues() {
+        if (issues.isEmpty()) {
+            translatedArea.setText("Issue がありません。Scanner を実行してから試してください。");
+            return;
+        }
+        translatedArea.setText("全Issueを日本語レポートにまとめています...");
+
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() {
+                StringBuilder sb = new StringBuilder();
+                sb.append("【Burp 診断結果サマリ（日本語）】\n\n");
+                int index = 1;
+                for (AuditIssue issue : issues) {
+                    try {
+                        String body = translationCache.get(issue);
+                        if (body == null || body.isBlank()) {
+                            body = AuditIssueJapaneseTranslator.translateIssue(issue);
+                            translationCache.put(issue, body);
+                        }
+                        sb.append("=== Issue ").append(index++).append(" ===\n");
+                        sb.append(body).append("\n\n");
+                    } catch (Exception e) {
+                        api.logging().logToError("Failed to summarize issue: " + e.getMessage());
+                    }
+                }
+                return sb.toString().trim();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String result = get();
+                    translatedArea.setText(result);
+                    TranslationResultDialog.showDialog(result);
+                } catch (Exception e) {
+                    translatedArea.setText("Error: " + e.getMessage());
                 }
             }
         }.execute();
