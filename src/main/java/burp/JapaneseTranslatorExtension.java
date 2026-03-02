@@ -8,10 +8,12 @@ public class JapaneseTranslatorExtension implements BurpExtension {
     public void initialize(MontoyaApi api) {
         api.extension().setName("Japanese Translator");
         
-        // Register the context menu provider
-        api.userInterface().registerContextMenuItemsProvider(
-                new TranslationContextMenuProvider(api)
-        );
+        IssueTranslationTab issueTab = new IssueTranslationTab(api);
+
+        api.userInterface().registerSuiteTab("日本語（診断結果）", issueTab.uiComponent());
+        api.userInterface().registerContextMenuItemsProvider(new TranslationContextMenuProvider(api, issueTab));
+
+        api.scanner().registerAuditIssueHandler(issueTab);
         
         api.logging().logToOutput("Japanese Translator extension loaded successfully.");
     }

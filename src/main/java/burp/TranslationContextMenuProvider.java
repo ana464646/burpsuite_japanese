@@ -1,6 +1,7 @@
 package burp;
 
 import burp.api.montoya.MontoyaApi;
+import burp.api.montoya.scanner.audit.issues.AuditIssue;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 import burp.api.montoya.ui.contextmenu.MessageEditorHttpRequestResponse;
@@ -14,14 +15,27 @@ import java.util.Optional;
 public class TranslationContextMenuProvider implements ContextMenuItemsProvider {
 
     private final MontoyaApi api;
+    private final IssueTranslationTab issueTab;
 
-    public TranslationContextMenuProvider(MontoyaApi api) {
+    public TranslationContextMenuProvider(MontoyaApi api, IssueTranslationTab issueTab) {
         this.api = api;
+        this.issueTab = issueTab;
     }
 
     @Override
     public List<Component> provideMenuItems(ContextMenuEvent event) {
         List<Component> menuItems = new ArrayList<>();
+
+        List<AuditIssue> selectedIssues = event.selectedIssues();
+        if (selectedIssues != null && !selectedIssues.isEmpty()) {
+            JMenuItem translateIssueItem = new JMenuItem("選択Issueを日本語表示");
+            translateIssueItem.addActionListener(e -> translateIssueAndShowResult(selectedIssues.get(0)));
+            menuItems.add(translateIssueItem);
+
+            JMenuItem openIssueTabItem = new JMenuItem("日本語（診断結果）タブを開く");
+            openIssueTabItem.addActionListener(e -> issueTab.focus());
+            menuItems.add(openIssueTabItem);
+        }
 
         Optional<MessageEditorHttpRequestResponse> editorOpt = event.messageEditorRequestResponse();
         if (editorOpt.isPresent()) {
@@ -73,6 +87,30 @@ public class TranslationContextMenuProvider implements ContextMenuItemsProvider 
                     TranslationResultDialog.showDialog(result);
                 } catch (Exception e) {
                     api.logging().logToError("Failed to display translation: " + e.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    private void translateIssueAndShowResult(AuditIssue issue) {
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() {
+                try {
+                    return AuditIssueJapaneseTranslator.translateIssue(issue);
+                } catch (Exception ex) {
+                    api.logging().logToError("Issue translation failed: " + ex.getMessage());
+                    return "Error: " + ex.getMessage();
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String result = get();
+                    TranslationResultDialog.showDialog(result);
+                } catch (Exception e) {
+                    api.logging().logToError("Failed to display issue translation: " + e.getMessage());
                 }
             }
         }.execute();
