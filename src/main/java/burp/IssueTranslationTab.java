@@ -254,25 +254,112 @@ public class IssueTranslationTab implements AuditIssueHandler {
         new SwingWorker<String, Integer>() {
             @Override
             protected String doInBackground() {
-                StringBuilder sb = new StringBuilder();
-                sb.append("【Burp 診断結果サマリ（日本語）】\n\n");
-                int index = 1;
-                int done = 0;
-                for (AuditIssue issue : issues) {
+                int high = 0;
+                int medium = 0;
+                int low = 0;
+                int info = 0;
+
+                java.util.List<String> highNames = new java.util.ArrayList<>();
+                java.util.List<String> mediumNames = new java.util.ArrayList<>();
+
+                for (int i = 0; i < issues.size(); i++) {
+                    AuditIssue issue = issues.get(i);
                     try {
-                        String body = translationCache.get(issue);
-                        if (body == null || body.isBlank()) {
-                            body = AuditIssueJapaneseTranslator.translateIssue(issue);
-                            translationCache.put(issue, body);
+                        switch (issue.severity()) {
+                            case HIGH -> high++;
+                            case MEDIUM -> medium++;
+                            case LOW -> low++;
+                            case INFORMATION -> info++;
+                            case FALSE_POSITIVE -> {
+                            }
                         }
-                        sb.append("=== Issue ").append(index++).append(" ===\n");
-                        sb.append(body).append("\n\n");
-                        done++;
-                        publish(done);
+
+                        // 代表的な名称を数件だけピックアップ
+                        String nameJa = "";
+                        Object cell = model.getValueAt(i, 4);
+                        if (cell != null && !cell.toString().isBlank()) {
+                            nameJa = cell.toString();
+                        } else {
+                            nameJa = AuditIssueJapaneseTranslator.translateName(issue);
+                        }
+                        if (!nameJa.isBlank()) {
+                            if (issue.severity() == burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH
+                                    && highNames.size() < 3 && !highNames.contains(nameJa)) {
+                                highNames.add(nameJa);
+                            } else if (issue.severity() == burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.MEDIUM
+                                    && mediumNames.size() < 3 && !mediumNames.contains(nameJa)) {
+                                mediumNames.add(nameJa);
+                            }
+                        }
                     } catch (Exception e) {
-                        api.logging().logToError("Failed to summarize issue: " + e.getMessage());
+                        api.logging().logToError("Failed while aggregating summary: " + e.getMessage());
                     }
+                    publish(i + 1);
                 }
+
+                String overall;
+                if (high > 0) {
+                    overall = "危険";
+                } else if (medium > 0) {
+                    overall = "注意";
+                } else if (low > 0 || info > 0) {
+                    overall = "低";
+                } else {
+                    overall = "問題なし";
+                }
+
+                StringBuilder sb = new StringBuilder();
+                sb.append("・脆弱性診断の結果、");
+                if (high > 0) {
+                    sb.append("リスクレベル「High」の指摘事項が").append(high).append("件検出されました。");
+                    if (!highNames.isEmpty()) {
+                        sb.append(" 主な指摘事項として、");
+                        for (int i = 0; i < highNames.size(); i++) {
+                            if (i > 0) {
+                                sb.append("、");
+                            }
+                            sb.append("「").append(highNames.get(i)).append("」");
+                        }
+                        sb.append("が確認されています。");
+                    }
+                } else {
+                    sb.append("リスクレベル「High」の指摘事項は検出されませんでした。");
+                }
+                sb.append(" そのため、総合評価は「").append(overall).append("」となります。");
+
+                java.util.List<String> tail = new java.util.ArrayList<>();
+                if (medium > 0) {
+                    tail.add("「Medium」が" + medium + "件");
+                }
+                if (low > 0) {
+                    tail.add("「Low」が" + low + "件");
+                }
+                if (info > 0) {
+                    tail.add("「info」が" + info + "件");
+                }
+                if (!tail.isEmpty()) {
+                    sb.append(" そのほか、");
+                    for (int i = 0; i < tail.size(); i++) {
+                        if (i > 0) {
+                            sb.append("、");
+                        }
+                        sb.append(tail.get(i));
+                    }
+                    sb.append("確認されておりますので、併せてご確認ください。");
+                }
+
+                if (!mediumNames.isEmpty()) {
+                    sb.append("\n\n");
+                    sb.append("・リスクレベル「Medium」の主な指摘事項として、");
+                    for (int i = 0; i < mediumNames.size(); i++) {
+                        if (i > 0) {
+                            sb.append("、");
+                        }
+                        sb.append("「").append(mediumNames.get(i)).append("」");
+                    }
+                    sb.append("が確認されています。内容をご確認のうえ、優先度を考慮して対策されることを推奨します。");
+                }
+
                 return sb.toString().trim();
             }
 
