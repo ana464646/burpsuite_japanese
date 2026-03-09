@@ -34,6 +34,9 @@ public class IssueTranslationTab implements AuditIssueHandler {
     private AuditIssue pendingTranslateIssue;
     private AuditIssue currentlyDisplayedIssue;
 
+    private final JTextField hostFilterField;
+    private final JTextField searchField;
+
     public IssueTranslationTab(MontoyaApi api) {
         this.api = api;
 
@@ -69,37 +72,40 @@ public class IssueTranslationTab implements AuditIssueHandler {
         );
         mainSplit.setResizeWeight(0.45);
 
-        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         JButton refresh = new JButton("更新（Site map の Issue を再取得）");
         refresh.addActionListener(e -> reloadFromSiteMap());
         JButton summarizeAll = new JButton("全Issueを日本語レポート化");
         summarizeAll.addActionListener(e -> summarizeAllIssues());
 
-        JLabel hostLabel = new JLabel("対象ホスト:");
-        JTextField hostFilterField = new JTextField(18);
+        hostFilterField = new JTextField(22);
         hostFilterField.setToolTipText("対象URLに含まれる文字で絞り込み（例: example.com）");
-        JLabel searchLabel = new JLabel("検索:");
-        JTextField searchField = new JTextField(18);
+        searchField = new JTextField(22);
         searchField.setToolTipText("表のどの列でも検索（重大度・名称など）");
 
         DocumentListener filterListener = new DocumentListener() {
             @Override
-            public void insertUpdate(DocumentEvent e) { applyFilter(hostFilterField, searchField); }
+            public void insertUpdate(DocumentEvent e) { applyFilter(); }
             @Override
-            public void removeUpdate(DocumentEvent e) { applyFilter(hostFilterField, searchField); }
+            public void removeUpdate(DocumentEvent e) { applyFilter(); }
             @Override
-            public void changedUpdate(DocumentEvent e) { applyFilter(hostFilterField, searchField); }
+            public void changedUpdate(DocumentEvent e) { applyFilter(); }
         };
         hostFilterField.getDocument().addDocumentListener(filterListener);
         searchField.getDocument().addDocumentListener(filterListener);
 
-        top.add(refresh);
-        top.add(summarizeAll);
-        top.add(new JSeparator(SwingConstants.VERTICAL));
-        top.add(hostLabel);
-        top.add(hostFilterField);
-        top.add(searchLabel);
-        top.add(searchField);
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        buttonRow.add(refresh);
+        buttonRow.add(summarizeAll);
+
+        JPanel filterRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        filterRow.add(new JLabel("対象ホスト:"));
+        filterRow.add(hostFilterField);
+        filterRow.add(new JLabel("検索:"));
+        filterRow.add(searchField);
+
+        JPanel top = new JPanel(new BorderLayout(0, 4));
+        top.add(buttonRow, BorderLayout.NORTH);
+        top.add(filterRow, BorderLayout.CENTER);
 
         root = new JPanel(new BorderLayout(8, 8));
         root.add(top, BorderLayout.NORTH);
@@ -156,6 +162,7 @@ public class IssueTranslationTab implements AuditIssueHandler {
                     translatedArea.setText("");
                     originalArea.setText("");
                     for (AuditIssue i : loaded) addIssue(i);
+                    applyFilter();
                 } catch (Exception e) {
                     api.logging().logToError("Failed to update issue list: " + e.getMessage());
                 }
@@ -192,7 +199,7 @@ public class IssueTranslationTab implements AuditIssueHandler {
         translateDebounceTimer.restart();
     }
 
-    private void applyFilter(JTextField hostFilterField, JTextField searchField) {
+    private void applyFilter() {
         String host = hostFilterField.getText().trim();
         String search = searchField.getText().trim();
         if (host.isEmpty() && search.isEmpty()) {
