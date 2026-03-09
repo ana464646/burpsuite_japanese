@@ -5,6 +5,8 @@ import burp.api.montoya.scanner.audit.AuditIssueHandler;
 import burp.api.montoya.scanner.audit.issues.AuditIssue;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
@@ -67,14 +69,37 @@ public class IssueTranslationTab implements AuditIssueHandler {
         );
         mainSplit.setResizeWeight(0.45);
 
-        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
         JButton refresh = new JButton("更新（Site map の Issue を再取得）");
         refresh.addActionListener(e -> reloadFromSiteMap());
         JButton summarizeAll = new JButton("全Issueを日本語レポート化");
         summarizeAll.addActionListener(e -> summarizeAllIssues());
 
+        JLabel hostLabel = new JLabel("対象ホスト:");
+        JTextField hostFilterField = new JTextField(18);
+        hostFilterField.setToolTipText("対象URLに含まれる文字で絞り込み（例: example.com）");
+        JLabel searchLabel = new JLabel("検索:");
+        JTextField searchField = new JTextField(18);
+        searchField.setToolTipText("表のどの列でも検索（重大度・名称など）");
+
+        DocumentListener filterListener = new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) { applyFilter(hostFilterField, searchField); }
+            @Override
+            public void removeUpdate(DocumentEvent e) { applyFilter(hostFilterField, searchField); }
+            @Override
+            public void changedUpdate(DocumentEvent e) { applyFilter(hostFilterField, searchField); }
+        };
+        hostFilterField.getDocument().addDocumentListener(filterListener);
+        searchField.getDocument().addDocumentListener(filterListener);
+
         top.add(refresh);
         top.add(summarizeAll);
+        top.add(new JSeparator(SwingConstants.VERTICAL));
+        top.add(hostLabel);
+        top.add(hostFilterField);
+        top.add(searchLabel);
+        top.add(searchField);
 
         root = new JPanel(new BorderLayout(8, 8));
         root.add(top, BorderLayout.NORTH);
@@ -167,6 +192,40 @@ public class IssueTranslationTab implements AuditIssueHandler {
         translateDebounceTimer.restart();
     }
 
+    private void applyFilter(JTextField hostFilterField, JTextField searchField) {
+        String host = hostFilterField.getText().trim();
+        String search = searchField.getText().trim();
+        if (host.isEmpty() && search.isEmpty()) {
+            sorter.setRowFilter(null);
+            return;
+        }
+        sorter.setRowFilter(new RowFilter<DefaultTableModel, Integer>() {
+            @Override
+            public boolean include(Entry<? extends DefaultTableModel, ? extends Integer> entry) {
+                if (!host.isEmpty()) {
+                    String target = String.valueOf(entry.getValue(2));
+                    if (!target.toLowerCase().contains(host.toLowerCase())) {
+                        return false;
+                    }
+                }
+                if (!search.isEmpty()) {
+                    boolean found = false;
+                    for (int i = 0; i <= 4; i++) {
+                        String cell = String.valueOf(entry.getValue(i));
+                        if (cell.toLowerCase().contains(search.toLowerCase())) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        });
+    }
+
     private AuditIssue getSelectedIssue() {
         int viewRow = table.getSelectedRow();
         if (viewRow < 0) return null;
@@ -249,127 +308,38 @@ public class IssueTranslationTab implements AuditIssueHandler {
             return;
         }
         final int total = issues.size();
-        translatedArea.setText("全Issueを日本語レポートにまとめています... 0/" + total);
+        translatedArea.setText("スキャン結果を日本語で羅列しています... 0/" + total);
 
         new SwingWorker<String, Integer>() {
             @Override
             protected String doInBackground() {
-                int high = 0;
-                int medium = 0;
-                int low = 0;
-                int info = 0;
-
-                java.util.List<String> highNames = new java.util.ArrayList<>();
-                java.util.List<String> mediumNames = new java.util.ArrayList<>();
-
-                for (int i = 0; i < issues.size(); i++) {
-                    AuditIssue issue = issues.get(i);
-                    try {
-                        switch (issue.severity()) {
-                            case HIGH -> high++;
-                            case MEDIUM -> medium++;
-                            case LOW -> low++;
-                            case INFORMATION -> info++;
-                            case FALSE_POSITIVE -> {
-                            }
-                        }
-
-                        // 代表的な名称を数件だけピックアップ
-                        String nameJa = "";
-                        Object cell = model.getValueAt(i, 4);
-                        if (cell != null && !cell.toString().isBlank()) {
-                            nameJa = cell.toString();
-                        } else {
-                            nameJa = AuditIssueJapaneseTranslator.translateName(issue);
-                        }
-                        if (!nameJa.isBlank()) {
-                            if (issue.severity() == burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH
-                                    && highNames.size() < 3 && !highNames.contains(nameJa)) {
-                                highNames.add(nameJa);
-                            } else if (issue.severity() == burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.MEDIUM
-                                    && mediumNames.size() < 3 && !mediumNames.contains(nameJa)) {
-                                mediumNames.add(nameJa);
-                            }
-                        }
-                    } catch (Exception e) {
-                        api.logging().logToError("Failed while aggregating summary: " + e.getMessage());
-                    }
-                    publish(i + 1);
-                }
-
-                String overall;
-                if (high > 0) {
-                    overall = "危険";
-                } else if (medium > 0) {
-                    overall = "注意";
-                } else if (low > 0 || info > 0) {
-                    overall = "低";
-                } else {
-                    overall = "問題なし";
-                }
-
                 StringBuilder sb = new StringBuilder();
-                sb.append("・脆弱性診断の結果、");
-                if (high > 0) {
-                    sb.append("リスクレベル「High」の指摘事項が").append(high).append("件検出されました。");
-                    if (!highNames.isEmpty()) {
-                        sb.append(" 主な指摘事項として、");
-                        for (int i = 0; i < highNames.size(); i++) {
-                            if (i > 0) {
-                                sb.append("、");
-                            }
-                            sb.append("「").append(highNames.get(i)).append("」");
+                sb.append("【Burp スキャン結果（日本語・羅列）】\n\n");
+                int index = 1;
+                int done = 0;
+                for (AuditIssue issue : issues) {
+                    try {
+                        String body = translationCache.get(issue);
+                        if (body == null || body.isBlank()) {
+                            body = AuditIssueJapaneseTranslator.translateIssue(issue);
+                            translationCache.put(issue, body);
                         }
-                        sb.append("が確認されています。");
+                        sb.append("=== Issue ").append(index++).append(" ===\n");
+                        sb.append(body).append("\n\n");
+                        done++;
+                        publish(done);
+                    } catch (Exception e) {
+                        api.logging().logToError("Failed to translate issue: " + e.getMessage());
                     }
-                } else {
-                    sb.append("リスクレベル「High」の指摘事項は検出されませんでした。");
                 }
-                sb.append(" そのため、総合評価は「").append(overall).append("」となります。");
-
-                java.util.List<String> tail = new java.util.ArrayList<>();
-                if (medium > 0) {
-                    tail.add("「Medium」が" + medium + "件");
-                }
-                if (low > 0) {
-                    tail.add("「Low」が" + low + "件");
-                }
-                if (info > 0) {
-                    tail.add("「info」が" + info + "件");
-                }
-                if (!tail.isEmpty()) {
-                    sb.append(" そのほか、");
-                    for (int i = 0; i < tail.size(); i++) {
-                        if (i > 0) {
-                            sb.append("、");
-                        }
-                        sb.append(tail.get(i));
-                    }
-                    sb.append("確認されておりますので、併せてご確認ください。");
-                }
-
-                if (!mediumNames.isEmpty()) {
-                    sb.append("\n\n");
-                    sb.append("・リスクレベル「Medium」の主な指摘事項として、");
-                    for (int i = 0; i < mediumNames.size(); i++) {
-                        if (i > 0) {
-                            sb.append("、");
-                        }
-                        sb.append("「").append(mediumNames.get(i)).append("」");
-                    }
-                    sb.append("が確認されています。内容をご確認のうえ、優先度を考慮して対策されることを推奨します。");
-                }
-
                 return sb.toString().trim();
             }
 
             @Override
             protected void process(List<Integer> chunks) {
-                if (chunks == null || chunks.isEmpty()) {
-                    return;
-                }
-                int done = chunks.get(chunks.size() - 1);
-                translatedArea.setText("全Issueを日本語レポートにまとめています... " + done + "/" + total);
+                if (chunks == null || chunks.isEmpty()) return;
+                int d = chunks.get(chunks.size() - 1);
+                translatedArea.setText("スキャン結果を日本語で羅列しています... " + d + "/" + total);
             }
 
             @Override
